@@ -1,0 +1,121 @@
+# File: wilcoxon.rank-sum.R
+# Purpose: This R code runs the two-sample wilcoxon rank sum test on cancer
+#          and normal methylation data.  It is run with the following factors:
+#          alternative = two.sided (default)
+#          mu = 0 (default)
+#          paired = FALSE (default)
+#          exact = TRUE
+#          correct = TRUE (default)
+#          conf.int = FALSE (default)
+#          conf.level = 0.95 (default)
+# Usage: Rscript wilcoxon.rank-sum.R cancerForwInput cancerRevInput normalForwInput normalRevInput OutputFile
+# Input: Input file should not have a header and should be in the following
+#        format:
+#        chr  pos  cancerSamples  normalSamples
+# NOTE: It is important to follow the usage as indicated.  The output does not
+#       have a header.  The output is as follows:
+#       CHR POS CancerSamples NormalSamples CancerMean NormalMean WRSStat Pvalue
+###############################################################################
+
+
+#########################################
+# Two-sample T-test, Variance Not Equal #
+#########################################
+# Performs two-sample T-test using the forward-reverse ratio for cancer as the
+# first sample and the forward-reverse ratio for normal as the second sample.
+custom.WRStest <- function( v, canSamples ) {
+        truth <- length( v )
+        normStart <- canSamples + 1
+        normEnd <- truth - 1
+
+	# v[] will be true if:
+	# - numNA in cancer < 3 & numNA in normal < 3
+	# - var in cancer > 0 & var in normal > 0
+	if( v[truth] ) {
+		can <- v[1:canSamples]
+		norm <- v[normStart:normEnd]
+		can <- as.numeric(can)
+		norm <- as.numeric(norm)
+
+		WRSTest <- wilcox.test(x = can, y = norm, exact = TRUE)
+		testVector <- c(WRSTest$statistic, WRSTest$p.value)
+		return ( testVector )
+	}
+	else {
+		return ( c(NA,NA) )
+	}
+}
+
+args <- commandArgs(TRUE)
+
+outputFile <- args[5]
+numCanSamples <- as.numeric( args[6] )
+numNormSamples <- as.numeric( args[7] )
+
+##############
+# READ FILES #
+##############
+cat( "Reading cancer forward data...\n" )
+CAN.F.DATA <- read.table( file = args[1], header = F, sep = "\t" )
+
+cat( "Reading cancer reverse data...\n" ) 
+CAN.R.DATA <- read.table( file = args[2], header = F, sep = "\t" )
+
+cat( "Reading normal forward data...\n" )
+NORM.F.DATA <- read.table( file = args[3], header = F, sep = "\t" )
+
+cat( "Reading normal reverse data...\n" )
+NORM.R.DATA <- read.table( file = args[4], header = F, sep = "\t" )
+cat( "--> Data read.\n\n")
+
+canLastCol <- dim( CAN.F.DATA )[2]
+normLastCol <- dim( NORM.F.DATA )[2]
+
+###################################################
+# Calculate difference in forward/reverse MRatios #
+###################################################
+cat( "Calculating difference between forward/reverse ratios...\n" )
+CAN.diff <- as.matrix( CAN.F.DATA[,3:canLastCol] - CAN.R.DATA[,3:canLastCol] )
+NORM.diff <- as.matrix( NORM.F.DATA[,3:normLastCol] - NORM.R.DATA[,3:normLastCol] )
+DIFF <- cbind( CAN.diff, NORM.diff )
+cat( "--> Difference calculated.\n\n" )
+
+
+#####################################################
+# Calculate means for cancer and normal differences #
+#####################################################
+cat( "Calculating means for cancer and normal groups...\n" )
+canMean <- apply( CAN.diff, 1, mean )
+normMean <- apply( NORM.diff, 1, mean )
+cat( "--> Means calculated.\n\n" )
+
+
+#####################################
+# Run WRS-test for necessary values #
+#####################################
+cat( "Running Wilcoxon Rank Sum test...\n" )
+cancer.truth <- as.matrix( apply( CAN.diff, 1, function(v) { return( (sum(is.na(v)) < 3) & (var(v, na.rm = T) > 0) ) } ) )
+normal.truth <- as.matrix( apply( NORM.diff, 1, function(v) { return( (sum(is.na(v)) < 3) & (var(v, na.rm = T) > 0) ) } ) )
+total.truth <- cbind( cancer.truth, normal.truth )
+truth.col <- as.matrix( total.truth[,1] & total.truth[,2] )
+DIFF.1 <- cbind( DIFF, truth.col )
+WRStest <- t( apply( DIFF.1, 1, custom.WRStest, canSamples=numCanSamples ) )
+cat( "--> Test complete.\n\n" )
+
+
+#########################################
+# Convert and write data to output file #
+#########################################
+cat( "Combining columns into one table...\n" )
+CHR.POS <- CAN.F.DATA[,1:2]
+
+ALL.DATA <- cbind( CHR.POS, DIFF, canMean, normMean, WRStest )
+cat( "--> Table completed.\n\n" )
+
+
+######################
+# Write data to file #
+######################
+cat( "Writing data to output file...\n" )
+write.table( ALL.DATA, file = args[5], append = F, quote = F, sep = "\t", row.names = F, col.names = F )
+cat( "--> Data write complete.\n\n" )
